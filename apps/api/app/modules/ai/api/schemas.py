@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from typing import Literal
+from uuid import UUID
 
 from pydantic import BaseModel, Field
 
@@ -33,6 +34,46 @@ class ChatRequestSchema(BaseModel):
     system_prompt: str | None = Field(
         default=None,
         description="Optional system prompt to prepend to the conversation.",
+    )
+    conversation_id: UUID | None = Field(
+        default=None,
+        description=(
+            "Optional id of an existing conversation to associate this chat "
+            "with. If omitted, chat behavior is unchanged. If supplied, the "
+            "conversation must exist. Sprint 4 does not yet persist messages "
+            "against it -- that is deferred to a later sprint."
+        ),
+    )
+
+
+class ChatStreamRequestSchema(BaseModel):
+    """Request payload for the AI chat streaming endpoint.
+
+    Unlike :class:`ChatRequestSchema`, ``conversation_id`` is required: this
+    endpoint's entire purpose is to stream tokens while updating a
+    conversation's assistant message in real time, so there is no
+    "unchanged without one" fallback the way there is for ``POST /chat``.
+    """
+
+    message: str = Field(description="The user's message to send to the model.")
+    model_alias: ModelAlias = Field(
+        default=ModelAlias.CHAT_FAST,
+        description="Logical model role to route the request to.",
+    )
+    temperature: float | None = Field(
+        default=None,
+        description="Sampling temperature override, if supported by the provider.",
+    )
+    system_prompt: str | None = Field(
+        default=None,
+        description="Optional system prompt to prepend to the conversation.",
+    )
+    conversation_id: UUID = Field(
+        description=(
+            "Id of an existing conversation to stream this chat into. The "
+            "user's message and the streamed assistant reply are both "
+            "persisted against it."
+        ),
     )
 
 

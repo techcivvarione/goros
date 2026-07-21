@@ -11,6 +11,11 @@ from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.core.logging import get_logger
+from app.modules.conversations.domain.exceptions import (
+    ConversationError,
+    ConversationNotFoundError,
+    MessageNotFoundError,
+)
 from app.modules.llm.domain.exceptions import (
     LLMGatewayError,
     ModelAliasNotConfiguredError,
@@ -249,6 +254,53 @@ async def handle_llm_gateway_error(_: Request, exc: LLMGatewayError) -> JSONResp
     return build_error_response(status_code, payload)
 
 
+_CONVERSATION_ERROR_STATUS: dict[type[ConversationError], int] = {
+    ConversationNotFoundError: status.HTTP_404_NOT_FOUND,
+    MessageNotFoundError: status.HTTP_404_NOT_FOUND,
+}
+
+_CONVERSATION_ERROR_CODE: dict[type[ConversationError], str] = {
+    ConversationNotFoundError: "conversation_not_found",
+    MessageNotFoundError: "message_not_found",
+}
+
+
+def _conversation_error_message(exc: ConversationError) -> str:
+    """Build a safe, user-facing message for a Conversations domain error."""
+
+    if isinstance(exc, ConversationNotFoundError):
+        return f"Conversation '{exc.conversation_id}' was not found."
+    if isinstance(exc, MessageNotFoundError):
+        return f"Message '{exc.message_id}' was not found."
+    return "An unexpected conversation error occurred."
+
+
+async def handle_conversation_error(_: Request, exc: ConversationError) -> JSONResponse:
+    """Translate Conversations domain errors into the standard error response.
+
+    Maps each known :class:`ConversationError` subclass to a stable error
+    code and HTTP status code (404 for a missing/deleted conversation).
+    Unrecognized ``ConversationError`` subclasses fall back to a generic 500
+    response rather than leaking implementation detail.
+    """
+
+    exc_type = type(exc)
+    status_code = _CONVERSATION_ERROR_STATUS.get(
+        exc_type, status.HTTP_500_INTERNAL_SERVER_ERROR
+    )
+    error_code = _CONVERSATION_ERROR_CODE.get(exc_type, "conversation_error")
+    message = _conversation_error_message(exc)
+    log_exception_response(
+        event="conversation_error",
+        message=message,
+        status_code=status_code,
+        details={"error_code": error_code, "exception_type": exc_type.__name__},
+        exc_info=status_code == status.HTTP_500_INTERNAL_SERVER_ERROR,
+    )
+    payload = error_response(code=error_code, message=message, details={})
+    return build_error_response(status_code, payload)
+
+
 def register_exception_handlers(app: FastAPI) -> None:
     """Attach application exception handlers to the FastAPI app."""
 
@@ -259,6 +311,10 @@ def register_exception_handlers(app: FastAPI) -> None:
     app.add_exception_handler(
         LLMGatewayError,
         cast(ExceptionHandler, handle_llm_gateway_error),
+    )
+    app.add_exception_handler(
+        ConversationError,
+        cast(ExceptionHandler, handle_conversation_error),
     )
     app.add_exception_handler(
         RequestValidationError,

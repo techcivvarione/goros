@@ -1,10 +1,9 @@
 """Ollama provider adapter for the LLM Gateway.
 
-Implements chat, model listing, health checking, and best-effort token
-counting against a local (or configured) Ollama server using the official
-``ollama`` Python package. ``stream()`` and ``embeddings()`` remain
-``NotImplementedError`` placeholders; they are out of scope for this sprint
-and are picked up in a later one.
+Implements chat, streaming chat, model listing, health checking, and
+best-effort token counting against a local (or configured) Ollama server
+using the official ``ollama`` Python package. ``embeddings()`` remains a
+``NotImplementedError`` placeholder; it is out of scope for this sprint.
 """
 
 from __future__ import annotations
@@ -12,6 +11,7 @@ from __future__ import annotations
 import time
 from collections.abc import AsyncIterator
 
+import httpx
 import ollama
 
 from app.core.config import Settings
@@ -170,10 +170,53 @@ class OllamaProvider(ProviderBase):
         )
 
     async def stream(self, request: ChatRequest) -> AsyncIterator[StreamChunk]:
-        """Yield incremental chat completion chunks from Ollama."""
+        """Yield incremental chat completion chunks from Ollama.
 
-        raise NotImplementedError("Ollama streaming is not yet implemented.")
-        yield  # pragma: no cover - unreachable; marks this as an async generator
+        Ollama's streaming protocol yields one JSON object per generation
+        step, where ``message.content`` is the incremental delta since the
+        previous chunk (not the cumulative text), and the final object
+        carries ``done=True`` plus completion metadata (``done_reason``,
+        ``prompt_eval_count``, ``eval_count``). This method accumulates
+        those deltas itself so each yielded :class:`StreamChunk.content` is
+        the full text generated so far, alongside ``delta`` for just the
+        new increment.
+
+        Unlike :meth:`chat`, a connection failure here is not wrapped into a
+        plain :class:`ConnectionError` by the ``ollama`` SDK (that wrapping
+        only happens on its non-streaming request path), so ``httpx``
+        connection errors are caught directly.
+        """
+
+        messages = _build_ollama_messages(request)
+        options = _build_options(request)
+
+        try:
+            response_stream = await self._client.chat(
+                model=request.model,
+                messages=messages,
+                options=options or None,
+                stream=True,
+            )
+        except ollama.ResponseError as exc:
+            raise ProviderRequestError(self.provider_type, str(exc)) from exc
+        except (ConnectionError, httpx.ConnectError) as exc:
+            raise ProviderRequestError(self.provider_type, str(exc)) from exc
+
+        accumulated_content = ""
+        try:
+            async for chunk in response_stream:
+                delta = chunk.message.content or ""
+                accumulated_content += delta
+                yield StreamChunk(
+                    content=accumulated_content,
+                    delta=delta,
+                    finish_reason=chunk.done_reason if chunk.done else None,
+                    usage=_extract_usage(chunk) if chunk.done else None,
+                )
+        except ollama.ResponseError as exc:
+            raise ProviderRequestError(self.provider_type, str(exc)) from exc
+        except httpx.ConnectError as exc:
+            raise ProviderRequestError(self.provider_type, str(exc)) from exc
 
     async def list_models(self) -> tuple[ModelInfo, ...]:
         """Return the models installed on the local Ollama server."""

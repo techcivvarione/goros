@@ -6,6 +6,10 @@ from logging.config import fileConfig
 
 from sqlalchemy import engine_from_config, pool
 
+# Importing the modules package transitively imports every module's ORM
+# models (e.g. app.modules.conversations.infrastructure.models), which
+# registers their tables on Base.metadata so autogenerate can see them.
+import app.modules  # noqa: E402,F401
 from alembic import context
 from app.core.config import get_settings
 from app.core.database import Base

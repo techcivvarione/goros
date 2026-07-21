@@ -8,19 +8,26 @@ internally.
 
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
+
 from app.modules.llm.application.manager import LLMManager
-from app.modules.llm.domain.entities import ChatRequest, ChatResponse, Message
+from app.modules.llm.domain.entities import (
+    ChatRequest,
+    ChatResponse,
+    Message,
+    StreamChunk,
+)
 from app.modules.llm.domain.enums import ModelAlias, ProviderType
 
 
 class AIService:
     """Single public entry point for AI operations across GOROS.
 
-    Only :meth:`chat` is implemented this sprint. The remaining methods are
-    declared to establish the service's intended surface and raise
-    ``NotImplementedError`` until their respective sprints implement them;
-    none have an agreed parameter or return shape yet, so none are
-    fabricated here.
+    Only :meth:`chat` and :meth:`stream` are implemented so far. The
+    remaining methods are declared to establish the service's intended
+    surface and raise ``NotImplementedError`` until their respective sprints
+    implement them; none have an agreed parameter or return shape yet, so
+    none are fabricated here.
     """
 
     def __init__(self, llm_manager: LLMManager) -> None:
@@ -57,6 +64,36 @@ class AIService:
             system_prompt=system_prompt,
         )
         return await self._llm_manager.chat(request, alias=model_alias)
+
+    async def stream(
+        self,
+        messages: tuple[Message, ...],
+        model_alias: ModelAlias,
+        *,
+        temperature: float | None = None,
+        system_prompt: str | None = None,
+    ) -> AsyncIterator[StreamChunk]:
+        """Generate a streaming chat completion for the given model alias.
+
+        Mirrors :meth:`chat`'s calling convention exactly, but yields
+        incremental :class:`StreamChunk` values from the resolved provider
+        instead of returning a single response. Uses the existing
+        :meth:`LLMManager.stream` contract; no changes were needed there.
+        """
+
+        request = ChatRequest(
+            # provider/model are placeholders: LLMManager.stream() resolves
+            # and overrides both from `model_alias` before delegating to a
+            # provider, since `alias` is always supplied below.
+            provider=ProviderType.OLLAMA,
+            model="",
+            messages=messages,
+            temperature=temperature,
+            system_prompt=system_prompt,
+            stream=True,
+        )
+        async for chunk in self._llm_manager.stream(request, alias=model_alias):
+            yield chunk
 
     async def summarize(self) -> None:
         """Summarize content. Not yet implemented."""
