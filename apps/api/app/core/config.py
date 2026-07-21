@@ -74,6 +74,52 @@ class Settings(BaseSettings):
 
     redis_url: str | None = Field(default=None, alias="REDIS_URL")
 
+    # Model alias bindings for the LLM Gateway's model registry. Each logical
+    # alias (e.g. CHAT_FAST) maps to a provider name and a model name. Kept
+    # as plain strings here (rather than the LLM module's ProviderType enum)
+    # so this core configuration module has no dependency on a feature
+    # module; the LLM module parses and validates these values itself.
+    model_alias_chat_fast_provider: str = Field(
+        default="ollama",
+        alias="MODEL_ALIAS_CHAT_FAST_PROVIDER",
+    )
+    model_alias_chat_fast_model: str = Field(
+        default="qwen3:8b",
+        alias="MODEL_ALIAS_CHAT_FAST_MODEL",
+    )
+    model_alias_chat_premium_provider: str = Field(
+        default="openai",
+        alias="MODEL_ALIAS_CHAT_PREMIUM_PROVIDER",
+    )
+    model_alias_chat_premium_model: str = Field(
+        default="gpt-5.5",
+        alias="MODEL_ALIAS_CHAT_PREMIUM_MODEL",
+    )
+    model_alias_reasoning_provider: str = Field(
+        default="anthropic",
+        alias="MODEL_ALIAS_REASONING_PROVIDER",
+    )
+    model_alias_reasoning_model: str = Field(
+        default="claude-opus",
+        alias="MODEL_ALIAS_REASONING_MODEL",
+    )
+    model_alias_vision_provider: str = Field(
+        default="ollama",
+        alias="MODEL_ALIAS_VISION_PROVIDER",
+    )
+    model_alias_vision_model: str = Field(
+        default="llama3.2-vision",
+        alias="MODEL_ALIAS_VISION_MODEL",
+    )
+    model_alias_embeddings_provider: str = Field(
+        default="ollama",
+        alias="MODEL_ALIAS_EMBEDDINGS_PROVIDER",
+    )
+    model_alias_embeddings_model: str = Field(
+        default="nomic-embed-text",
+        alias="MODEL_ALIAS_EMBEDDINGS_MODEL",
+    )
+
     openapi_contact_name: str = Field(
         default="GOROS Platform Team",
         alias="OPENAPI_CONTACT_NAME",

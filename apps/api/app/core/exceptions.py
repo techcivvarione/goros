@@ -11,6 +11,13 @@ from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.core.logging import get_logger
+from app.modules.llm.domain.exceptions import (
+    LLMGatewayError,
+    ModelAliasNotConfiguredError,
+    ModelResolverNotConfiguredError,
+    ProviderNotRegisteredError,
+    ProviderRequestError,
+)
 from app.shared.responses import ErrorResponse, error_response
 
 logger = get_logger(__name__)
@@ -179,12 +186,79 @@ async def handle_unexpected_exception(_: Request, exc: Exception) -> JSONRespons
     return build_error_response(status.HTTP_500_INTERNAL_SERVER_ERROR, payload)
 
 
+_LLM_GATEWAY_ERROR_STATUS: dict[type[LLMGatewayError], int] = {
+    ProviderRequestError: status.HTTP_503_SERVICE_UNAVAILABLE,
+    ProviderNotRegisteredError: status.HTTP_500_INTERNAL_SERVER_ERROR,
+    ModelAliasNotConfiguredError: status.HTTP_500_INTERNAL_SERVER_ERROR,
+    ModelResolverNotConfiguredError: status.HTTP_500_INTERNAL_SERVER_ERROR,
+}
+
+_LLM_GATEWAY_ERROR_CODE: dict[type[LLMGatewayError], str] = {
+    ProviderRequestError: "provider_unavailable",
+    ProviderNotRegisteredError: "provider_not_registered",
+    ModelAliasNotConfiguredError: "model_alias_not_configured",
+    ModelResolverNotConfiguredError: "model_resolver_not_configured",
+}
+
+
+def _llm_gateway_error_message(exc: LLMGatewayError) -> str:
+    """Build a safe, user-facing message for an LLM Gateway domain error.
+
+    Only stable, domain-level details are included (provider type, model
+    alias). This never includes provider SDK exception text -- notably
+    ``ProviderRequestError.reason``, which wraps the underlying SDK/network
+    failure -- nor any stack trace; those stay server-side in the log entry
+    emitted by :func:`log_exception_response`.
+    """
+
+    if isinstance(exc, ProviderRequestError):
+        return f"The '{exc.provider_type.value}' provider is currently unavailable."
+    if isinstance(exc, ProviderNotRegisteredError):
+        return f"Provider '{exc.provider_type.value}' is not registered."
+    if isinstance(exc, ModelAliasNotConfiguredError):
+        return f"Model alias '{exc.alias.value}' is not configured."
+    if isinstance(exc, ModelResolverNotConfiguredError):
+        return "No model resolver is configured for this request."
+    return "An unexpected LLM Gateway error occurred."
+
+
+async def handle_llm_gateway_error(_: Request, exc: LLMGatewayError) -> JSONResponse:
+    """Translate LLM Gateway domain errors into the standard error response.
+
+    Maps each known :class:`LLMGatewayError` subclass to a stable error code
+    and HTTP status code (503 for an unavailable provider, 500 for the
+    remaining configuration-shaped errors). Unrecognized ``LLMGatewayError``
+    subclasses fall back to a generic 500 response rather than leaking
+    implementation detail.
+    """
+
+    exc_type = type(exc)
+    status_code = _LLM_GATEWAY_ERROR_STATUS.get(
+        exc_type, status.HTTP_500_INTERNAL_SERVER_ERROR
+    )
+    error_code = _LLM_GATEWAY_ERROR_CODE.get(exc_type, "llm_gateway_error")
+    message = _llm_gateway_error_message(exc)
+    log_exception_response(
+        event="llm_gateway_error",
+        message=message,
+        status_code=status_code,
+        details={"error_code": error_code, "exception_type": exc_type.__name__},
+        exc_info=True,
+    )
+    payload = error_response(code=error_code, message=message, details={})
+    return build_error_response(status_code, payload)
+
+
 def register_exception_handlers(app: FastAPI) -> None:
     """Attach application exception handlers to the FastAPI app."""
 
     app.add_exception_handler(
         GOROSException,
         cast(ExceptionHandler, handle_goros_exception),
+    )
+    app.add_exception_handler(
+        LLMGatewayError,
+        cast(ExceptionHandler, handle_llm_gateway_error),
     )
     app.add_exception_handler(
         RequestValidationError,

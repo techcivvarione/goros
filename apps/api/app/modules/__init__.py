@@ -4,6 +4,7 @@ from fastapi import APIRouter
 
 from app.modules.admin import router as admin_router
 from app.modules.agents import router as agents_router
+from app.modules.ai import router as ai_router
 from app.modules.api_keys import router as api_keys_router
 from app.modules.audit import router as audit_router
 from app.modules.billing import router as billing_router
@@ -43,6 +44,7 @@ VERSIONED_ROUTERS: tuple[APIRouter, ...] = (
     documents_router,
     rag_router,
     embeddings_router,
+    ai_router,
     llm_router,
     models_router,
     tools_router,
